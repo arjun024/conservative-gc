@@ -1,11 +1,20 @@
 /* Do GC when @bytesAllocatedSinceLastGC breaches this */
-#define GC_THRESHOLD 1048576
+#define GC_THRESHOLD 524288
 
 template <class SourceHeap>
 GCMalloc<SourceHeap>::GCMalloc()
-{
+	: bytesAllocatedSinceLastGC (0),
+	bytesReclaimedLastGC (0),
+	objectsAllocated (0),
+	allocated (0),
+	allocatedObjects (NULL)
+ {
 
-}
+	startHeap = endHeap = SourceHeap::getStart();
+	for (auto& f : freedObjects) {
+	        f = NULL;
+	}
+ }
 
 template <class SourceHeap>
 void *GCMalloc<SourceHeap>::malloc(size_t sz)
