@@ -1,6 +1,4 @@
-/* Do GC when @bytesAllocatedSinceLastGC breaches this */
 #define GC_THRESHOLD 524288
-
 #define LIMIT_16KB 16384
 #define LIMIT_512MB 536870912
 #define CLASS_16KB 1024
@@ -52,12 +50,16 @@ GCMalloc<SourceHeap>::GCMalloc()
  }
 
 template <class SourceHeap>
-void *GCMalloc<SourceHeap>::malloc(size_t sz) //set cookie, init clear(), ObjectsAllocated
+void *GCMalloc<SourceHeap>::malloc(size_t sz)
+//bytesAllocatedSinceLastGC, endHeap, initialized, inGC, nextGC
 {
 	int class_index;
 	size_t rounded_sz, total_sz;
 	void *heap_mem;
 	Header *mem_chunk;
+
+	if (triggerGC(sz))
+		gc();
 
 	class_index = getSizeClass(sz);
 	if (class_index < 0)
@@ -86,13 +88,17 @@ void *GCMalloc<SourceHeap>::malloc(size_t sz) //set cookie, init clear(), Object
 
 	total_sz = HEADER_ALIGNED_SIZE + rounded_sz;
 	heap_mem = SourceHeap::malloc(total_sz);
+	endHeap = (char*)heap_mem + total_sz;
 	if (!heap_mem) {
 		perror("Out of Memory!!");
 		heapLock.unlock();
 		return NULL;
 	}
 	mem_chunk = (Header*) heap_mem;
+	mem_chunk->setCookie();
 	mem_chunk->setAllocatedSize(rounded_sz);
+	/* Pedantic: make sure mark bit is cleared */
+	mem_chunk->clear();
 
 out:
 	/* Connect it to the doubly linked list tailed by @allocatedObjects */
@@ -108,6 +114,8 @@ out:
 
 	/* A little stats */
 	allocated += rounded_sz;
+	bytesAllocatedSinceLastGC += rounded_sz;
+	objectsAllocated += 1;
 	heapLock.unlock();
 	return (void*)((char*)mem_chunk + HEADER_ALIGNED_SIZE);
 }
@@ -188,22 +196,31 @@ void GCMalloc<SourceHeap>::scan(void * start, void * end)
 
 }
 
+/* TODO more conditions, if the freelist for the appropriate size class is empty *and* there is no memory available,
+then you must trigger a collection. */
 template <class SourceHeap>
 bool GCMalloc<SourceHeap>::triggerGC(size_t szRequested)
 {
-
+	return bytesAllocatedSinceLastGC > nextGC;
 }
 
 template <class SourceHeap>
 void GCMalloc<SourceHeap>::gc()
 {
-
+	mark();
 }
 
 template <class SourceHeap>
 void GCMalloc<SourceHeap>::mark()
 {
-
+	//Empty walkGlobals causes SIGSEGV
+	//sp.walkGlobals([&](void *p){
+		//if (!p || !isPointer(p))
+		//	return;
+		//void *heap_ptr = (void **)(p);
+		//unsigned long heap_ptr = *(char*)p;
+		//uintptr_t heap_ptr = *(char*)p;
+	//});
 }
 
 template <class SourceHeap>
@@ -219,13 +236,58 @@ void GCMalloc<SourceHeap>::sweep()
 }
 
 template <class SourceHeap>
-void GCMalloc<SourceHeap>::privateFree(void *)
+void GCMalloc<SourceHeap>::privateFree(void * ptr)
 {
+	Header *header, *freelist;
+	int class_index;
 
+	if (!ptr || !isPointer(ptr))
+		return;
+
+	/* If address in unaligned, die gracefully and immediately */
+	if (!is_aligned(ptr))
+		return;
+
+	heapLock.lock();
+	header = (Header*)((char*)ptr - HEADER_ALIGNED_SIZE);
+
+	/* Disconnect from SourceHeap's doubly linked list tailed by @allocatedObjects */
+	if (header == allocatedObjects)
+		allocatedObjects = header->prevObject;
+
+	if (header->prevObject) {
+		header->prevObject->nextObject = header->nextObject;
+	}
+
+	if (header->nextObject) {
+		header->nextObject->prevObject = header->prevObject;
+	}
+
+	/* Connect to its free list chain */
+	class_index = getSizeClass(header->getAllocatedSize());
+	if (class_index < 0) {
+		perror("Memory error.");
+		heapLock.unlock();
+		return;
+	}
+	freelist = freedObjects[class_index];
+	freedObjects[class_index] = header;
+	header->prevObject = NULL;
+	header->nextObject = freelist;
+	if (freelist)
+		freelist->prevObject = header;
+
+	allocated -= header->getAllocatedSize();
+	heapLock.unlock();
 }
 
 template <class SourceHeap>
 bool GCMalloc<SourceHeap>::isPointer(void * p)
 {
-
+	/* TODO tmp: remove this, malloc(0) should not return NULL */
+	if (!p)
+		return true;
+	Header *header;
+	header = (Header*)((char*)p - HEADER_ALIGNED_SIZE);
+	return header->validateCookie();
 }
