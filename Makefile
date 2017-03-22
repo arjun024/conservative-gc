@@ -1,16 +1,18 @@
 UNAME_S := $(shell uname -s)
 
-FLAGS = -std=c++14 -g -O0 -fPIC -D_REENTRANT=1 -fno-omit-frame-pointer # -fsanitize=address -fno-common 
-
 ifeq ($(UNAME_S),Linux)
+FLAGS = -std=c++1y -g -O0 -fPIC -D_REENTRANT=1 -fno-omit-frame-pointer # -fsanitize=address -fno-common 
+
 all:
-	clang++ $(FLAGS) -c gnuwrapper.cpp
-	clang++ $(FLAGS) -c driver.cpp
-	clang++ $(FLAGS) -shared gnuwrapper.o driver.o -Bsymbolic -o libgcmalloc.so -ldl -lpthread
-	clang++ -std=c++14 -g testme.cpp -L. -lgcmalloc -o testme
+	g++ $(FLAGS) -c gnuwrapper.cpp
+	g++ $(FLAGS) -c driver.cpp
+	g++ $(FLAGS) -shared gnuwrapper.o driver.o -Bsymbolic -o libgcmalloc.so -ldl -lpthread
+	g++ -std=c++1y -g testme.cpp -L. -lgcmalloc -o testme
 endif
 
 ifeq ($(UNAME_S),Darwin)
+FLAGS = -std=c++14 -g -O0 -fPIC -D_REENTRANT=1 -fno-omit-frame-pointer # -fsanitize=address -fno-common 
+
 all:
 	clang++ $(FLAGS) -c macwrapper.cpp
 	clang++ $(FLAGS) -c driver.cpp
