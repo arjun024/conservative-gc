@@ -158,22 +158,25 @@ template <class SourceHeap>
 int constexpr GCMalloc<SourceHeap>::getSizeClass(size_t sz) //TODO: log2
 {
 	/* The size of sizeClass excludes the header size */
-
-	if (sz <= 0 || sz > LIMIT_512MB)
-		return -1;
-
 	/* 
 	* problem says: Your size classes should be exact multiples of 16
 	* for every size up to 16384, and then powers of two from 16,384 to 512 MB
 	* Class0 is kept unused for easy calculations.
 	* Class1 to Class1039 is valid.
 	*/
+	/* Upto LIMIT_16KB, there are CLASS_16KB classes */
 
+	/*if (sz <= 0 || sz > LIMIT_512MB)
+		return -1;
 	if (sz <= LIMIT_16KB)
 		return (int) ceil(sz / 16.0);
+	return (int) ceil(log2(sz)) - LOG_LIMIT_16KB + CLASS_16KB;*/
 
-	/* Upto LIMIT_16KB, there are CLASS_16KB classes */
-	return (int) ceil(log2(sz)) - LOG_LIMIT_16KB + CLASS_16KB;
+	return (sz <= 0 || sz > LIMIT_512MB) ?
+		-1 :
+			(sz <= LIMIT_16KB) ?
+				((int) ceil(sz / 16.0)) :
+					((int) ceil(log2(sz)) - LOG_LIMIT_16KB + CLASS_16KB);
 }
 
 

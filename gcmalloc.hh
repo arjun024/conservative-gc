@@ -207,7 +207,7 @@ private:
   
 };
 /* temporarily added for test purposes */
-extern "C" {
+/*extern "C" {
   void walk(const std::function< void(Header *) > f);
-}
+}*/
 #endif
