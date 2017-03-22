@@ -206,5 +206,8 @@ private:
 #endif
   
 };
-
+/* temporarily added for test purposes */
+extern "C" {
+  void walk(const std::function< void(Header *) > f);
+}
 #endif
