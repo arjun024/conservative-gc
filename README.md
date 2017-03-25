@@ -8,7 +8,7 @@ email: asreedharan@umass.edu
 
 Status: Work in Progress
 
-
+Tests: Tested successfully with testme, make, firefox.
 
 
 Problem statement

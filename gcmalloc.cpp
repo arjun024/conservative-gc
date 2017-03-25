@@ -222,19 +222,23 @@ then you must trigger a collection. */
 template <class SourceHeap>
 bool GCMalloc<SourceHeap>::triggerGC(size_t szRequested)
 {
-	bool k = bytesAllocatedSinceLastGC > nextGC;
-	//tprintf(k==true?"TR: true":"TR: false");
-	return k;
+	size_t heapRemaining = SourceHeap::getRemaining();
+	/* Do gc when not much of heap remains free. 4*nextGC holds no special significance */
+	if (heapRemaining < 4 * nextGC)
+		return true;
+	return bytesAllocatedSinceLastGC > nextGC;
 }
 
 template <class SourceHeap>
 void GCMalloc<SourceHeap>::gc()
 {
+	heapLock.lock();
 	inGC = true;
 	mark();
 	sweep();
 	bytesAllocatedSinceLastGC = 0;
 	inGC = false;
+	heapLock.unlock();
 }
 
 template <class SourceHeap>
@@ -283,9 +287,10 @@ void GCMalloc<SourceHeap>::markReachable(void *begin)
 template <class SourceHeap>
 void GCMalloc<SourceHeap>::sweep()
 {
+	bytesReclaimedLastGC = 0;
 	walk([&](Header *h){
 		if (h->isMarked()) {
-			/* This is a reachable obj, so clear as in init condition for next gc */
+			/* This is a reachable obj, so clear as an init condition for next gc */
 			h->clear();
 			return;
 		}
@@ -295,7 +300,7 @@ void GCMalloc<SourceHeap>::sweep()
 
 template <class SourceHeap>
 void GCMalloc<SourceHeap>::privateFree(void * ptr)
-{printf("freeing: %ld\n", bytesAllocatedSinceLastGC);
+{
 	Header *header, *freelist;
 	int class_index;
 
@@ -336,6 +341,7 @@ void GCMalloc<SourceHeap>::privateFree(void * ptr)
 		freelist->prevObject = header;
 
 	allocated -= header->getAllocatedSize();
+	bytesReclaimedLastGC +=  header->getAllocatedSize();
 	heapLock.unlock();
 }
 
