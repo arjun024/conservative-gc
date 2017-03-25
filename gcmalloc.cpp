@@ -222,7 +222,9 @@ then you must trigger a collection. */
 template <class SourceHeap>
 bool GCMalloc<SourceHeap>::triggerGC(size_t szRequested)
 {
-	return bytesAllocatedSinceLastGC > nextGC;
+	bool k = bytesAllocatedSinceLastGC > nextGC;
+	//tprintf(k==true?"TR: true":"TR: false");
+	return k;
 }
 
 template <class SourceHeap>
@@ -230,6 +232,9 @@ void GCMalloc<SourceHeap>::gc()
 {
 	inGC = true;
 	mark();
+	sweep();
+	bytesAllocatedSinceLastGC = 0;
+	inGC = false;
 }
 
 template <class SourceHeap>
@@ -247,7 +252,7 @@ void GCMalloc<SourceHeap>::mark()
 
 		/*find the header of the chunk that contains ptr */
 		tmp = (char*)ptr;
-		printf("KX: tmp: %p\n", (void*)tmp);
+		//printf("KX: tmp: %p\n", (void*)tmp);
 		while (1) {
 			/* the aligned address right before ptr in case ptr is not aligned */
 			if(!is_aligned(tmp))
@@ -257,7 +262,7 @@ void GCMalloc<SourceHeap>::mark()
 			tmp -= Alignment;
 		}
 		markReachable((void*)tmp);
-		printf("KX: Header: %p\n", (void*)hd);
+		//printf("KX: Header: %p\n", (void*)hd);
 	};
 
 	sp.walkStack(fn_marker);
@@ -278,7 +283,15 @@ void GCMalloc<SourceHeap>::markReachable(void *begin)
 template <class SourceHeap>
 void GCMalloc<SourceHeap>::sweep()
 {
-
+	Header *tmp = allocatedObjects;
+	for (; tmp; tmp = tmp->prevObject) {
+		if (tmp->isMarked()) {
+			/* This is a reachable obj, so clear as in init condition for next gc */
+			tmp->clear();
+			continue;
+		}
+		privateFree((char*)tmp + HEADER_ALIGNED_SIZE);
+	}
 }
 
 template <class SourceHeap>
@@ -333,6 +346,8 @@ bool GCMalloc<SourceHeap>::isPointer(void * p)
 	/* TODO tmp: remove this, malloc(0) should not return NULL */
 	if (!p)
 		return true;
+	if (p < (char*)startHeap + HEADER_ALIGNED_SIZE || p > endHeap)
+		return false;
 	Header *header;
 	header = (Header*)((char*)p - HEADER_ALIGNED_SIZE);
 	return header->validateCookie();
