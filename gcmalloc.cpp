@@ -283,20 +283,19 @@ void GCMalloc<SourceHeap>::markReachable(void *begin)
 template <class SourceHeap>
 void GCMalloc<SourceHeap>::sweep()
 {
-	Header *tmp = allocatedObjects;
-	for (; tmp; tmp = tmp->prevObject) {
-		if (tmp->isMarked()) {
+	walk([&](Header *h){
+		if (h->isMarked()) {
 			/* This is a reachable obj, so clear as in init condition for next gc */
-			tmp->clear();
-			continue;
+			h->clear();
+			return;
 		}
-		privateFree((char*)tmp + HEADER_ALIGNED_SIZE);
-	}
+		privateFree((char*)h + HEADER_ALIGNED_SIZE);
+	});
 }
 
 template <class SourceHeap>
 void GCMalloc<SourceHeap>::privateFree(void * ptr)
-{
+{printf("freeing: %ld\n", bytesAllocatedSinceLastGC);
 	Header *header, *freelist;
 	int class_index;
 
