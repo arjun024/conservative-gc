@@ -58,7 +58,7 @@ void *GCMalloc<SourceHeap>::malloc(size_t sz)
 	void *heap_mem;
 	Header *mem_chunk;
 
-	if (triggerGC(sz))
+	if (!inGC && triggerGC(sz))
 		gc();
 
 	class_index = getSizeClass(sz);
@@ -207,20 +207,20 @@ bool GCMalloc<SourceHeap>::triggerGC(size_t szRequested)
 template <class SourceHeap>
 void GCMalloc<SourceHeap>::gc()
 {
+	inGC = true;
 	mark();
 }
 
 template <class SourceHeap>
 void GCMalloc<SourceHeap>::mark()
 {
-	//Empty walkGlobals causes SIGSEGV
-	//sp.walkGlobals([&](void *p){
+	sp.walkGlobals([&](void *p){
 		//if (!p || !isPointer(p))
 		//	return;
 		//void *heap_ptr = (void **)(p);
 		//unsigned long heap_ptr = *(char*)p;
 		//uintptr_t heap_ptr = *(char*)p;
-	//});
+	});
 }
 
 template <class SourceHeap>
