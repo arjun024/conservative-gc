@@ -4,6 +4,7 @@
 #define CLASS_16KB 1024
 #define CLASS_512MB 1039
 #define LOG_LIMIT_16KB 14
+#define PTR_SIZE sizeof(void*)
 
 /***********************************************************************************************
  This part deals with aligning all memory chunks to the boundary defined by the enum Alignment.
@@ -89,6 +90,7 @@ void *GCMalloc<SourceHeap>::malloc(size_t sz)
 	total_sz = HEADER_ALIGNED_SIZE + rounded_sz;
 	heap_mem = SourceHeap::malloc(total_sz);
 	endHeap = (char*)heap_mem + total_sz;
+	//printf("updated end Heap to %u\n", (uintptr_t)endHeap);
 	if (!heap_mem) {
 		perror("Out of Memory!!");
 		heapLock.unlock();
@@ -191,9 +193,28 @@ int constexpr GCMalloc<SourceHeap>::getSizeClass(size_t sz) //TODO: log2
 /* private: */
 
 template <class SourceHeap>
-void GCMalloc<SourceHeap>::scan(void * start, void * end)
+void GCMalloc<SourceHeap>::scan(void *start, void *end)
 {
+	char *tmp, *p = (char*)start;
+	for (;p < end; p += PTR_SIZE) {
+		uintptr_t addr = *p;
+		if (addr < (uintptr_t)startHeap || addr > (uintptr_t)endHeap)
+			continue;
+		/* Ignore if it's a pointer to the same block, block is already marked */
+		if (addr >= (uintptr_t)start && addr <= (uintptr_t)end)
+			continue;
 
+		tmp = (char*)(void*)addr;
+		while (1) {
+			/* the aligned address right before ptr in case ptr is not aligned */
+			if(!is_aligned(tmp))
+				tmp = tmp + calc_align_offset(tmp) - Alignment;
+			if (isPointer((void*)tmp))
+				break;
+			tmp -= Alignment;
+		}
+		markReachable((void*)tmp);
+	}
 }
 
 /* TODO more conditions, if the freelist for the appropriate size class is empty *and* there is no memory available,
@@ -214,19 +235,44 @@ void GCMalloc<SourceHeap>::gc()
 template <class SourceHeap>
 void GCMalloc<SourceHeap>::mark()
 {
-	sp.walkGlobals([&](void *p){
-		//if (!p || !isPointer(p))
-		//	return;
-		//void *heap_ptr = (void **)(p);
-		//unsigned long heap_ptr = *(char*)p;
-		//uintptr_t heap_ptr = *(char*)p;
-	});
+	auto fn_marker = [&](void *ptr){
+		uintptr_t heap_iptr = (uintptr_t)ptr;
+		char *tmp;
+		Header *hd;
+
+		if (!heap_iptr)
+			return;
+		if (heap_iptr < (uintptr_t)startHeap || heap_iptr > (uintptr_t)endHeap)
+			return;
+
+		/*find the header of the chunk that contains ptr */
+		tmp = (char*)ptr;
+		printf("KX: tmp: %p\n", (void*)tmp);
+		while (1) {
+			/* the aligned address right before ptr in case ptr is not aligned */
+			if(!is_aligned(tmp))
+				tmp = tmp + calc_align_offset(tmp) - Alignment;
+			if (isPointer((void*)tmp))
+				break;
+			tmp -= Alignment;
+		}
+		markReachable((void*)tmp);
+		printf("KX: Header: %p\n", (void*)hd);
+	};
+
+	sp.walkStack(fn_marker);
+	sp.walkGlobals(fn_marker);
 }
 
 template <class SourceHeap>
-void GCMalloc<SourceHeap>::markReachable(void * ptr)
+void GCMalloc<SourceHeap>::markReachable(void *begin)
 {
-
+	void *end;
+	Header *hd;
+	hd = (Header*)((char*)begin - HEADER_ALIGNED_SIZE);
+	end = (void*)((char*)begin + hd->getAllocatedSize());
+	hd->mark();
+	scan(begin, end);
 }
 
 template <class SourceHeap>
