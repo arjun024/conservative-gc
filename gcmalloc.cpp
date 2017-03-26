@@ -48,18 +48,18 @@ GCMalloc<SourceHeap>::GCMalloc()
 	for (auto& f : freedObjects) {
 	        f = NULL;
 	}
+	initialized = true;
  }
 
 template <class SourceHeap>
 void *GCMalloc<SourceHeap>::malloc(size_t sz)
-//bytesAllocatedSinceLastGC, endHeap, initialized, inGC, nextGC
 {
 	int class_index;
 	size_t rounded_sz, total_sz;
 	void *heap_mem;
 	Header *mem_chunk;
 
-	if (!inGC && triggerGC(sz))
+	if (initialized && !inGC && triggerGC(sz))
 		gc();
 
 	class_index = getSizeClass(sz);
@@ -90,7 +90,6 @@ void *GCMalloc<SourceHeap>::malloc(size_t sz)
 	total_sz = HEADER_ALIGNED_SIZE + rounded_sz;
 	heap_mem = SourceHeap::malloc(total_sz);
 	endHeap = (char*)heap_mem + total_sz;
-	//printf("updated end Heap to %u\n", (uintptr_t)endHeap);
 	if (!heap_mem) {
 		perror("Out of Memory!!");
 		heapLock.unlock();
@@ -165,7 +164,7 @@ size_t GCMalloc<SourceHeap>::getSizeFromClass(int index)
 }
 
 template <class SourceHeap>
-int constexpr GCMalloc<SourceHeap>::getSizeClass(size_t sz) //TODO: log2
+int constexpr GCMalloc<SourceHeap>::getSizeClass(size_t sz)
 {
 	/* The size of sizeClass excludes the header size */
 	/* 
@@ -176,14 +175,20 @@ int constexpr GCMalloc<SourceHeap>::getSizeClass(size_t sz) //TODO: log2
 	*/
 	/* Upto LIMIT_16KB, there are CLASS_16KB classes */
 
-	/*if (sz <= 0 || sz > LIMIT_512MB)
+	/*
+	if (sz == 0)
+		return 1
+	if (sz > LIMIT_512MB)
 		return -1;
 	if (sz <= LIMIT_16KB)
 		return (int) ceil(sz / 16.0);
-	return (int) ceil(log2(sz)) - LOG_LIMIT_16KB + CLASS_16KB;*/
+	return (int) ceil(log2(sz)) - LOG_LIMIT_16KB + CLASS_16KB;
+	*/
 
-	return (sz <= 0 || sz > LIMIT_512MB) ?
-		-1 :
+	return (sz == 0) ?
+		1 :
+		(sz > LIMIT_512MB) ?
+			-1 :
 			(sz <= LIMIT_16KB) ?
 				((int) ceil(sz / 16.0)) :
 					((int) ceil(log2(sz)) - LOG_LIMIT_16KB + CLASS_16KB);
@@ -196,6 +201,7 @@ template <class SourceHeap>
 void GCMalloc<SourceHeap>::scan(void *start, void *end)
 {
 	char *tmp, *p = (char*)start;
+	/* Go through every potential pointer */
 	for (;p < end; p += PTR_SIZE) {
 		uintptr_t addr = *p;
 		if (addr < (uintptr_t)startHeap || addr > (uintptr_t)endHeap)
@@ -204,11 +210,13 @@ void GCMalloc<SourceHeap>::scan(void *start, void *end)
 		if (addr >= (uintptr_t)start && addr <= (uintptr_t)end)
 			continue;
 
-		tmp = (char*)(void*)addr;
+		tmp = p;
+		/* move to the aligned address right before tmp in case tmp is not aligned */
+		if(!is_aligned(tmp))
+			tmp = tmp + calc_align_offset(tmp) - Alignment;
+
+		/* backtrace until the beginning of the block, and recursively mark */
 		while (1) {
-			/* the aligned address right before ptr in case ptr is not aligned */
-			if(!is_aligned(tmp))
-				tmp = tmp + calc_align_offset(tmp) - Alignment;
 			if (isPointer((void*)tmp))
 				break;
 			tmp -= Alignment;
@@ -217,15 +225,32 @@ void GCMalloc<SourceHeap>::scan(void *start, void *end)
 	}
 }
 
-/* TODO more conditions, if the freelist for the appropriate size class is empty *and* there is no memory available,
+/* TODO more conditions, ,
 then you must trigger a collection. */
 template <class SourceHeap>
 bool GCMalloc<SourceHeap>::triggerGC(size_t szRequested)
 {
-	size_t heapRemaining = SourceHeap::getRemaining();
+	int class_index;
+	size_t heapRemaining;
+
+	if (!szRequested)
+		return false;
+
+	class_index = getSizeClass(szRequested);
+	heapRemaining = SourceHeap::getRemaining();
+
+	if (class_index < 0)
+		return false;
+
+	/* Do gc if freelist is empty and no memory available */
+	if (!freedObjects[class_index] && heapRemaining < szRequested)
+		return true;
+
 	/* Do gc when not much of heap remains free. 4*nextGC holds no special significance */
 	if (heapRemaining < 4 * nextGC)
 		return true;
+
+	/* Do gc when a lot of mem allocated since last gc */
 	return bytesAllocatedSinceLastGC > nextGC;
 }
 
@@ -245,28 +270,28 @@ template <class SourceHeap>
 void GCMalloc<SourceHeap>::mark()
 {
 	auto fn_marker = [&](void *ptr){
-		uintptr_t heap_iptr = (uintptr_t)ptr;
+		uintptr_t heap_iptr;
 		char *tmp;
 		Header *hd;
 
+		heap_iptr = (uintptr_t)ptr;
 		if (!heap_iptr)
 			return;
 		if (heap_iptr < (uintptr_t)startHeap || heap_iptr > (uintptr_t)endHeap)
 			return;
 
-		/*find the header of the chunk that contains ptr */
 		tmp = (char*)ptr;
-		//printf("KX: tmp: %p\n", (void*)tmp);
-		while (1) {
-			/* the aligned address right before ptr in case ptr is not aligned */
-			if(!is_aligned(tmp))
-				tmp = tmp + calc_align_offset(tmp) - Alignment;
+		/* move to the aligned address right before tmp in case tmp is not aligned */
+		if(!is_aligned(tmp))
+			tmp = tmp + calc_align_offset(tmp) - Alignment;
+
+		/* backtrace until the beginning of the block, and recursively mark */
+		while (1) {	
 			if (isPointer((void*)tmp))
 				break;
 			tmp -= Alignment;
 		}
 		markReachable((void*)tmp);
-		//printf("KX: Header: %p\n", (void*)hd);
 	};
 
 	sp.walkStack(fn_marker);
@@ -274,14 +299,14 @@ void GCMalloc<SourceHeap>::mark()
 }
 
 template <class SourceHeap>
-void GCMalloc<SourceHeap>::markReachable(void *begin)
+void GCMalloc<SourceHeap>::markReachable(void *block)
 {
-	void *end;
+	void *block_end;
 	Header *hd;
-	hd = (Header*)((char*)begin - HEADER_ALIGNED_SIZE);
-	end = (void*)((char*)begin + hd->getAllocatedSize());
+	hd = (Header*)((char*)block - HEADER_ALIGNED_SIZE);
+	block_end = (void*)((char*)block + hd->getAllocatedSize());
 	hd->mark();
-	scan(begin, end);
+	scan(block, block_end);
 }
 
 template <class SourceHeap>
@@ -290,7 +315,7 @@ void GCMalloc<SourceHeap>::sweep()
 	bytesReclaimedLastGC = 0;
 	walk([&](Header *h){
 		if (h->isMarked()) {
-			/* This is a reachable obj, so clear as an init condition for next gc */
+			/* This is a reachable obj, so clear() as an init condition for next gc */
 			h->clear();
 			return;
 		}
@@ -348,9 +373,6 @@ void GCMalloc<SourceHeap>::privateFree(void * ptr)
 template <class SourceHeap>
 bool GCMalloc<SourceHeap>::isPointer(void * p)
 {
-	/* TODO tmp: remove this, malloc(0) should not return NULL */
-	if (!p)
-		return true;
 	if (p < (char*)startHeap + HEADER_ALIGNED_SIZE || p > endHeap)
 		return false;
 	Header *header;
