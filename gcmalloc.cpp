@@ -275,8 +275,7 @@ void GCMalloc<SourceHeap>::mark()
 		Header *hd;
 
 		heap_iptr = (uintptr_t)ptr;
-		if (!heap_iptr)
-			return;
+
 		if (heap_iptr < (uintptr_t)startHeap || heap_iptr > (uintptr_t)endHeap)
 			return;
 
