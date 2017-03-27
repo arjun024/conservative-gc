@@ -6,7 +6,7 @@ Author: Arjun Sreedharan
 
 email: asreedharan@umass.edu
 
-Status: Work in Progress
+Status: Done
 
 Tests: Tested successfully with testme, make, firefox.
 

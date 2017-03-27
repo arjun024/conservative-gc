@@ -276,7 +276,7 @@ void GCMalloc<SourceHeap>::mark()
 
 		heap_iptr = (uintptr_t)ptr;
 
-		if (heap_iptr < (uintptr_t)startHeap || heap_iptr > (uintptr_t)endHeap)
+		if (heap_iptr < (uintptr_t)startHeap + HEADER_ALIGNED_SIZE || heap_iptr > (uintptr_t)endHeap)
 			return;
 
 		tmp = (char*)ptr;
